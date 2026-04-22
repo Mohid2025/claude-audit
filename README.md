@@ -165,6 +165,7 @@ When an API key is available, Claude Audit runs a **manual agentic loop**: Claud
 - 📏 **Result size caps** — 16 KB per tool result, 200 KB per file read (Claude is told to use ranges)
 - ⏳ **Budget-aware nudges** — at 70% of the budget Claude is reminded to finalise instead of over-exploring
 - 🧭 **Full audit trail** — every tool call is recorded to `.claude-audit/agent-trace.jsonl` (turn, input, output preview, duration, error flag). Disable with `--no-trace`.
+- 📺 **Live streaming tree view** — the CLI prints each turn and tool call as it happens (no more opaque spinner); add `-V / --verbose` for per-turn token spend, tool durations, and result previews.
 
 **Why an agentic audit beats a one-shot one:**
 | | One-shot (`--fast`) | Agentic *(default)* |
@@ -360,6 +361,7 @@ Options:
   --max-turns <n>           Agentic iteration cap (default: 25)
   --max-budget <tokens>     Agentic token ceiling (default: 500000)
   --no-trace                Don't write agent-trace.jsonl
+  -V, --verbose             Show per-turn token spend, tool durations, and result previews
   --output-dir <dir>        Directory for report files (default: .claude-audit/)
   -q, --quiet               Suppress progress output
   --json                    Output JSON to stdout (CI/CD mode)

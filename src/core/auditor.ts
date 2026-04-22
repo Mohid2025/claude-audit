@@ -9,6 +9,12 @@ import { analyzeSecrets } from '../analyzers/static/secrets';
 import { analyzeDependencies } from '../analyzers/static/dependencies';
 import { analyzeComplexity } from '../analyzers/static/complexity';
 import { analyzeWithClaude, analyzeWithClaudeAgent } from '../analyzers/ai/claude-analyzer';
+import type { AgentLoopHooks } from '../analyzers/ai/agent-loop';
+
+export interface AuditHooks {
+  /** Hooks forwarded into the agentic loop (turn start/end, tool calls, etc.). */
+  agent?: AgentLoopHooks;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { version: VERSION } = require('../../package.json');
@@ -67,6 +73,7 @@ function buildStaticOnlyCategories(staticFindings: Finding[], filterCategories?:
 export async function runAudit(
   options: AuditOptions,
   onProgress: (msg: string) => void,
+  hooks: AuditHooks = {},
 ): Promise<AuditReport> {
   const startTime = Date.now();
 
@@ -110,7 +117,15 @@ export async function runAudit(
           filterCategories: options.categories,
           files,
           hooks: {
-            onProgress: (m) => onProgress(m),
+            onProgress: (m) => {
+              hooks.agent?.onProgress?.(m);
+              onProgress(m);
+            },
+            onToolCall:    hooks.agent?.onToolCall,
+            onTurnStart:   hooks.agent?.onTurnStart,
+            onTurnEnd:     hooks.agent?.onTurnEnd,
+            onApiResponse: hooks.agent?.onApiResponse,
+            onFinish:      hooks.agent?.onFinish,
           },
         });
         categories = mergeStaticIntoCategories(result.categories, allStaticFindings);

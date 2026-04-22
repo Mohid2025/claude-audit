@@ -14,6 +14,7 @@ import { printBanner, printReport } from './reporters/terminal';
 import { generateMarkdownReport } from './reporters/markdown';
 import { generateHtmlReport } from './reporters/html';
 import { generateJsonReport } from './reporters/json';
+import { AgentLogger } from './reporters/agent-log';
 import type { AuditOptions } from './core/types';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
     .option('--max-turns <n>', 'Max tool-use iterations for agentic mode', '25')
     .option('--max-budget <tokens>', 'Hard ceiling on total tokens (input+output) per agentic audit', '500000')
     .option('--no-trace', 'Do not write agent-trace.jsonl (trace is on by default in agentic mode)')
+    .option('-V, --verbose', 'Show per-turn token spend, tool durations, and result previews', false)
     .option('--output-dir <dir>', 'Directory for report files (default: .claude-audit/)')
     .option('-q, --quiet', 'Suppress progress output', false)
     .option('--json', 'Output JSON to stdout (for CI/CD)', false)
@@ -45,6 +47,7 @@ async function main(): Promise<void> {
 Examples:
   $ npx claude-audit                              # agentic audit (default when API key set)
   $ npx claude-audit ./my-project
+  $ npx claude-audit --verbose                    # show per-turn tokens + tool previews
   $ npx claude-audit --fast                       # one-shot mode (cheaper, shallower)
   $ npx claude-audit --max-turns 40 --max-budget 1000000
   $ npx claude-audit --static --output markdown   # no AI, static only
@@ -96,25 +99,67 @@ Examples:
     printBanner();
   }
 
-  // Progress spinner
-  let spinner = ora({ text: 'Initializing...', color: 'cyan' });
-  if (!opts['json'] && !options.quiet) {
-    spinner.start();
-  }
+  const liveMode = !opts['json'] && !options.quiet;
+
+  // Pre-agent spinner: used during scan + static phases only. For agentic runs
+  // the spinner is stopped before the loop starts so the streaming tree has
+  // exclusive control of the terminal; for --fast / --static runs we keep the
+  // spinner for the whole analysis.
+  const spinner = ora({ text: 'Initializing...', color: 'yellow' });
+  if (liveMode) spinner.start();
+
+  // Streaming tree logger for agentic runs.
+  const agentLogger = liveMode && options.agentic
+    ? new AgentLogger({ verbose: !!opts['verbose'] })
+    : undefined;
+
+  let spinnerHandedOff = false;
 
   const progressLog = (msg: string): void => {
-    if (opts['json'] || options.quiet) return;
-    spinner.text = chalk.cyan(msg);
+    if (!liveMode) return;
+    // Once the agent loop has started, spinner has been retired and the
+    // logger owns all progress rendering.
+    if (spinnerHandedOff && agentLogger) {
+      agentLogger.progress(msg);
+      return;
+    }
+    // Hand-off point: the auditor emits this exact message right before it
+    // calls into the agentic loop. We stop the spinner and light up the logger.
+    if (agentLogger && msg.startsWith('Starting agentic audit')) {
+      spinner.stop();
+      agentLogger.start({
+        model: options.model,
+        maxTurns: options.maxTurns,
+        maxBudgetTokens: options.maxBudgetTokens,
+      });
+      spinnerHandedOff = true;
+      return;
+    }
+    spinner.text = chalk.hex('#E8A87C')(msg);
   };
 
   let exitCode = 0;
 
   try {
-    const report = await runAudit(options, progressLog);
+    const report = await runAudit(options, progressLog, {
+      agent: agentLogger
+        ? {
+            onTurnStart:   (info)           => agentLogger.turnStart(info),
+            onApiResponse: (info)           => agentLogger.apiResponse(info),
+            onToolCall:    (record, meta)   => agentLogger.toolCall(record, meta),
+            onTurnEnd:     (info)           => agentLogger.turnEnd(info),
+            onFinish:      (summary)        => agentLogger.finish(summary),
+          }
+        : undefined,
+    });
 
-    if (!opts['json'] && !options.quiet) {
-      spinner.succeed(chalk.green(`Audit complete in ${report.durationMs < 1000 ? report.durationMs + 'ms' : (report.durationMs / 1000).toFixed(1) + 's'}`));
-      console.log();
+    if (liveMode) {
+      if (!spinnerHandedOff) {
+        spinner.succeed(chalk.hex('#E8A87C')(`Audit complete in ${report.durationMs < 1000 ? report.durationMs + 'ms' : (report.durationMs / 1000).toFixed(1) + 's'}`));
+      } else {
+        // Logger already printed its own finish rule; just a blank line to breathe.
+        console.log();
+      }
     }
 
     // Generate outputs
@@ -183,7 +228,7 @@ Examples:
     }
 
   } catch (err) {
-    spinner.fail(chalk.red('Audit failed'));
+    if (spinner.isSpinning) spinner.fail(chalk.red('Audit failed'));
     console.error(chalk.red('\n  Error: ') + (err instanceof Error ? err.message : String(err)));
     console.error(chalk.gray('\n  Try running with --static if you don\'t have an API key.'));
     exitCode = 2;

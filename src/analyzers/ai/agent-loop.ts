@@ -73,9 +73,41 @@ Your job is to investigate the codebase using the provided tools, then submit a 
 Return no prose outside of tool calls. Use tool calls to act; use \`finalize_audit\` to conclude.`;
 
 // ── Hooks (caller-facing API) ────────────────────
+export interface TurnStartInfo {
+  turn: number;
+  maxTurns: number;
+}
+
+export interface TurnEndInfo {
+  turn: number;
+  /** Tokens the model spent on *this* turn alone (delta vs cumulative). */
+  turnInputTokens: number;
+  turnOutputTokens: number;
+  turnCacheReadTokens: number;
+  turnCacheCreationTokens: number;
+  /** Running totals after this turn. */
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  cumulativeCacheReadTokens: number;
+  /** Wall-clock duration of this turn (API call + tool execution). */
+  durationMs: number;
+  /** How many tool_use blocks Claude emitted this turn. */
+  toolCalls: number;
+}
+
+export interface ToolCallMeta {
+  indexInTurn: number;
+  totalInTurn: number;
+}
+
 export interface AgentLoopHooks {
   onProgress?: (msg: string) => void;
-  onToolCall?: (record: ToolCallRecord) => void;
+  onToolCall?: (record: ToolCallRecord, meta: ToolCallMeta) => void;
+  onTurnStart?: (info: TurnStartInfo) => void;
+  onTurnEnd?: (info: TurnEndInfo) => void;
+  onFinish?: (summary: AgentTraceSummary) => void;
+  /** Emitted when the model's response arrives but before tools execute. */
+  onApiResponse?: (info: { turn: number; toolCalls: number }) => void;
 }
 
 export interface AgentLoopOptions {
@@ -171,6 +203,13 @@ export async function runAgentLoop(
   try {
     while (turn < opts.maxTurns) {
       turn++;
+      const turnStartTime = Date.now();
+      const preTurnInput = inputTokens;
+      const preTurnOutput = outputTokens;
+      const preTurnCacheRead = cacheReadTokens;
+      const preTurnCacheCreation = cacheCreationTokens;
+
+      hooks.onTurnStart?.({ turn, maxTurns: opts.maxTurns });
       hooks.onProgress?.(`Claude is reasoning (turn ${turn}/${opts.maxTurns}, ${inputTokens + outputTokens} tokens used)...`);
 
       // Build the request. Prompt-cache the stable parts: system prompt + tool defs.
@@ -254,11 +293,15 @@ export async function runAgentLoop(
 
       messages.push({ role: 'assistant', content: finalMessage.content });
 
-      // Execute tool calls (in parallel where safe)
+      hooks.onApiResponse?.({ turn, toolCalls: toolUseBlocks.length });
+
+      // Execute tool calls (sequentially — keeps ordering stable for UI + trace)
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       let trippedRepetition = false;
 
-      for (const block of toolUseBlocks) {
+      for (let idx = 0; idx < toolUseBlocks.length; idx++) {
+        const block = toolUseBlocks[idx];
+        const meta: ToolCallMeta = { indexInTurn: idx, totalInTurn: toolUseBlocks.length };
         const name = block.name as ToolName;
         const input = (block.input ?? {}) as Record<string, unknown>;
 
@@ -285,7 +328,7 @@ export async function runAgentLoop(
             timestamp: new Date().toISOString(),
           };
           trace.push(record);
-          hooks.onToolCall?.(record);
+          hooks.onToolCall?.(record, meta);
           continue;
         }
         recentHashes.push(h);
@@ -335,7 +378,7 @@ export async function runAgentLoop(
           timestamp: new Date().toISOString(),
         };
         trace.push(record);
-        hooks.onToolCall?.(record);
+        hooks.onToolCall?.(record, meta);
 
         // If finalize_audit was called, we'll bail out of the loop cleanly
         // after sending its tool_result back. But since calling finalize
@@ -344,6 +387,20 @@ export async function runAgentLoop(
           break;
         }
       }
+
+      // Emit turn-end with per-turn usage delta so the UI can show cache %, etc.
+      hooks.onTurnEnd?.({
+        turn,
+        turnInputTokens: inputTokens - preTurnInput,
+        turnOutputTokens: outputTokens - preTurnOutput,
+        turnCacheReadTokens: cacheReadTokens - preTurnCacheRead,
+        turnCacheCreationTokens: cacheCreationTokens - preTurnCacheCreation,
+        cumulativeInputTokens: inputTokens,
+        cumulativeOutputTokens: outputTokens,
+        cumulativeCacheReadTokens: cacheReadTokens,
+        durationMs: Date.now() - turnStartTime,
+        toolCalls: toolUseBlocks.length,
+      });
 
       // Budget-awareness nudge: when we pass 70% of the turn/token budget,
       // append a plain text hint to the user-turn so Claude finalises rather
@@ -401,6 +458,8 @@ export async function runAgentLoop(
     durationMs,
     toolUsage,
   };
+
+  hooks.onFinish?.(summary);
 
   const agentTrace: AgentTrace = {
     enabled: true,
