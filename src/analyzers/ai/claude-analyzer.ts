@@ -4,7 +4,9 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { scoreToGrade } from '../../core/types';
-import type { ScannedFile, ProjectInfo, Finding, CategoryScore, AuditCategory } from '../../core/types';
+import type { ScannedFile, ProjectInfo, Finding, CategoryScore, AuditCategory, AgentTrace } from '../../core/types';
+import { runAgentLoop, buildInitialUserPrompt, type AgentLoopHooks } from './agent-loop';
+import type { ToolContext } from './tools';
 
 const MAX_CONTEXT_CHARS = 60_000;
 const PRIORITY_EXTENSIONS = ['ts', 'js', 'py', 'go', 'rs', 'java', 'rb'];
@@ -195,5 +197,55 @@ export async function analyzeWithClaude(
       summary: data.summary ?? '',
     };
   });
+}
+
+// ─────────────────────────────────────────────
+//  Agentic analyzer — Claude drives its own investigation via tools
+// ─────────────────────────────────────────────
+
+export interface AgenticAnalysisOptions {
+  projectRoot: string;
+  info: ProjectInfo;
+  staticFindings: Finding[];
+  apiKey: string;
+  model: string;
+  maxTurns: number;
+  maxBudgetTokens: number;
+  filterCategories?: AuditCategory[];
+  files: ScannedFile[];
+  hooks?: AgentLoopHooks;
+}
+
+export interface AgenticAnalysisResult {
+  categories: CategoryScore[];
+  trace: AgentTrace;
+}
+
+export async function analyzeWithClaudeAgent(
+  opts: AgenticAnalysisOptions,
+): Promise<AgenticAnalysisResult> {
+  const ctx: ToolContext = {
+    projectRoot: opts.projectRoot,
+    projectInfo: opts.info,
+    staticFindings: opts.staticFindings,
+    onFinalize: () => { /* replaced by runAgentLoop */ },
+  };
+
+  const prompt = buildInitialUserPrompt(opts.info, opts.files, opts.filterCategories);
+
+  const result = await runAgentLoop(
+    ctx,
+    {
+      apiKey: opts.apiKey,
+      model: opts.model,
+      maxTurns: opts.maxTurns,
+      maxBudgetTokens: opts.maxBudgetTokens,
+      filterCategories: opts.filterCategories,
+    },
+    opts.hooks ?? {},
+    prompt,
+  );
+
+  return result;
 }
 

@@ -59,9 +59,34 @@ export function generateMarkdownReport(report: AuditReport, outputPath: string):
   if (project.packageManager) {
     lines.push(`| **Package Manager** | ${project.packageManager} |`);
   }
-  lines.push(`| **Analysis Type** | ${report.aiPowered ? '✦ AI-Powered (Claude)' : '⚡ Static Analysis'} |`);
+  lines.push(`| **Analysis Type** | ${report.agentic ? '✦ Agentic (Claude + tools)' : report.aiPowered ? '✦ AI-Powered (Claude)' : '⚡ Static Analysis'} |`);
   lines.push(`| **Duration** | ${report.durationMs < 1000 ? report.durationMs + 'ms' : (report.durationMs / 1000).toFixed(1) + 's'} |`);
   lines.push('');
+
+  if (report.agentTrace) {
+    const s = report.agentTrace.summary;
+    lines.push('## 🧭 Agent Trace');
+    lines.push('');
+    lines.push('| Metric | Value |');
+    lines.push('|--------|-------|');
+    lines.push(`| **Model** | \`${report.agentTrace.model}\` |`);
+    lines.push(`| **Turns** | ${s.turns} / ${report.agentTrace.maxTurns} |`);
+    lines.push(`| **Tool calls** | ${s.toolCalls} |`);
+    lines.push(`| **Tool errors** | ${s.errors} |`);
+    lines.push(`| **Tokens (in / out)** | ${s.inputTokens.toLocaleString()} / ${s.outputTokens.toLocaleString()} |`);
+    lines.push(`| **Cache reads** | ${s.cacheReadTokens.toLocaleString()} |`);
+    lines.push(`| **Stop reason** | \`${s.stopReason}\`${s.stopDetail ? ' — ' + s.stopDetail : ''} |`);
+    lines.push('');
+    const usage = Object.entries(s.toolUsage).sort((a, b) => b[1] - a[1]);
+    if (usage.length > 0) {
+      lines.push('**Tool usage**');
+      lines.push('');
+      for (const [name, count] of usage) {
+        lines.push(`- \`${name}\` — ${count}`);
+      }
+      lines.push('');
+    }
+  }
 
   // Overall score
   lines.push('## 📊 Overall Score');

@@ -22,9 +22,9 @@
 
 ## What is Claude Audit?
 
-**Claude Audit** is a zero-config, AI-powered codebase auditor that runs like `npx claude-audit` and gives you the kind of comprehensive audit report that would cost thousands from a consulting firm — in under 60 seconds.
+**Claude Audit** is a zero-config, AI-powered codebase auditor that runs like `npx claude-audit` and gives you the kind of comprehensive audit report that would cost thousands from a consulting firm.
 
-It combines **static analysis** (fast, no API key needed) with **Claude AI's deep reasoning** to surface real, actionable issues across 7 dimensions:
+It combines **static analysis** (fast, no API key needed), **one-shot AI review**, and a true **agentic audit loop** where Claude actively investigates your codebase — reading files, searching for patterns, and verifying every finding with evidence — across 7 dimensions:
 
 | Category | What It Checks |
 |----------|---------------|
@@ -41,14 +41,20 @@ It combines **static analysis** (fast, no API key needed) with **Claude AI's dee
 ## Quick Start
 
 ```bash
-# Zero install — just run it
-npx claude-audit
-
-# With AI-powered analysis (recommended)
+# Zero install — just run it (agentic audit when API key is set)
 ANTHROPIC_API_KEY=sk-ant-... npx claude-audit
+
+# Static only — no API key required
+npx claude-audit --static
 
 # Specific project path
 npx claude-audit ./path/to/project
+
+# One-shot AI mode — cheaper & faster, shallower than agentic
+npx claude-audit --fast
+
+# Control the agent budget
+npx claude-audit --max-turns 40 --max-budget 1000000
 
 # Output to HTML + Markdown reports
 npx claude-audit --output terminal,html,markdown
@@ -128,9 +134,46 @@ claude-audit ./my-project
 
 ## Features
 
-### 🤖 Dual-Mode Analysis
-- **Static Mode** (no API key): Fast regex + AST-based analysis. Works offline.
-- **AI Mode** (requires `ANTHROPIC_API_KEY`): Claude reads your actual code and provides senior-engineer-level insights with specific file/line references.
+### 🤖 Three Analysis Modes
+| Mode | Flag | When to use |
+|------|------|-------------|
+| **Static** | `--static` | No API key, offline, CI pre-checks. Regex + AST rules. |
+| **One-shot AI** | `--fast` | Cheap & fast Claude review of a files digest. |
+| **Agentic** *(default when `ANTHROPIC_API_KEY` is set)* | *(default)* | Claude actively investigates via tools — reads files, runs searches, verifies every finding with evidence. Deepest signal, highest accuracy. |
+
+### 🧭 Agentic Audit — How it works
+When an API key is available, Claude Audit runs a **manual agentic loop**: Claude is given a read-only, sandboxed tool set and orchestrates its own investigation.
+
+**Tools Claude has access to:**
+- `get_project_summary` — languages, frameworks, test setup
+- `get_static_findings` — deterministic findings to build on (never duplicate)
+- `read_dependency_manifest` — `package.json`, `requirements.txt`, etc.
+- `list_files` — glob-based discovery
+- `search_code` — literal or regex search across the repo
+- `read_file` — line-range reads with numbered output
+- `finalize_audit` — structured submission of findings
+
+**Production guardrails (all enabled by default):**
+- 🛡️ **Path sandboxing** — every file access is resolved against the project root; traversal (`..`), absolute-path escape, and null-byte smuggling are rejected
+- 🔒 **Read-only by construction** — no tool can write, spawn shells, or hit the network
+- 🔁 **Repetition circuit breaker** — same tool call 3× in the last 6 calls aborts the loop before it wastes budget
+- 🎯 **Iteration cap** — hard ceiling of 25 tool-use turns (configurable via `--max-turns`)
+- 💰 **Token budget** — 500k-token hard ceiling per audit (configurable via `--max-budget`)
+- 📉 **Prompt caching** — stable system prompt + tool defs are cached (typically 80%+ cache hit rate)
+- ⏱️ **Per-turn streaming** — no SDK HTTP timeouts on long reasoning turns
+- 🧯 **Errors as results** — tool failures are returned to Claude as recoverable results; the loop never crashes
+- 📏 **Result size caps** — 16 KB per tool result, 200 KB per file read (Claude is told to use ranges)
+- ⏳ **Budget-aware nudges** — at 70% of the budget Claude is reminded to finalise instead of over-exploring
+- 🧭 **Full audit trail** — every tool call is recorded to `.claude-audit/agent-trace.jsonl` (turn, input, output preview, duration, error flag). Disable with `--no-trace`.
+
+**Why an agentic audit beats a one-shot one:**
+| | One-shot (`--fast`) | Agentic *(default)* |
+|---|---|---|
+| Evidence quality | Limited to file digest sent in the prompt | Claude reads actual files, line-by-line, and verifies each finding |
+| Cross-file insight | Hard — small context window | Native — Claude pulls what it needs |
+| False positives | Higher (inference from partial view) | Lower (must cite file:line + snippet) |
+| Cost | Lower, bounded | Higher but **capped** via `--max-budget` |
+| Latency | Single API call | Multiple turns (still ~1-3 min typical) |
 
 ### 📄 Multiple Output Formats
 | Format | Flag | Description |
@@ -145,11 +188,18 @@ claude-audit ./my-project
 # Static analysis only (no AI, no API key)
 claude-audit --static
 
+# One-shot AI mode (no agentic loop, cheaper)
+claude-audit --fast
+
 # Specific categories only
 claude-audit --categories security,dependencies
 
 # Control scope
 claude-audit --max-files 1000 --max-file-size 200
+
+# Tune the agent
+claude-audit --max-turns 40 --max-budget 1000000
+claude-audit --no-trace          # skip agent-trace.jsonl
 
 # Use a specific Claude model
 claude-audit --model claude-opus-4-6
@@ -235,14 +285,28 @@ Your Codebase
 │  • Complexity & quality checks  │
 └─────────────────────────────────┘
      │
-     ▼ (if ANTHROPIC_API_KEY set)
-┌─────────────────────────────────┐
-│       Claude AI Analysis        │
-│  • Reads your actual code       │
-│  • 7-category deep analysis     │
-│  • Scores each category 0-100   │
-│  • Specific, actionable fixes   │
-└─────────────────────────────────┘
+     ▼ (if ANTHROPIC_API_KEY set — default path)
+┌─────────────────────────────────────────────────┐
+│          Claude — Agentic Audit Loop            │
+│                                                 │
+│   ┌─────────────────────────────────────┐      │
+│   │  Claude reasons → picks a tool call │◄─┐   │
+│   └─────────────────────────────────────┘  │   │
+│                 │                           │   │
+│                 ▼                           │   │
+│   ┌─────────────────────────────────────┐  │   │
+│   │  Sandboxed executor runs the tool   │  │   │
+│   │  (list_files / search_code /        │  │   │
+│   │   read_file / ...) — read-only      │  │   │
+│   └─────────────────────────────────────┘  │   │
+│                 │                           │   │
+│                 └───────── tool_result ─────┘   │
+│                                                 │
+│   Guardrails:  max-turns · max-budget ·         │
+│   repetition detector · path sandbox · trace    │
+│                                                 │
+│   Terminates when Claude calls finalize_audit   │
+└─────────────────────────────────────────────────┘
      │
      ▼
 ┌─────────────────────────────────┐
@@ -251,8 +315,19 @@ Your Codebase
 │  • audit-report.md              │
 │  • audit-report.html            │
 │  • audit-report.json            │
+│  • agent-trace.jsonl            │
 └─────────────────────────────────┘
 ```
+
+### Trace artifact
+Every agentic audit produces `.claude-audit/agent-trace.jsonl` with one event per line:
+```jsonl
+{"kind":"meta","model":"claude-sonnet-4-6","maxTurns":25,"maxBudgetTokens":500000,"summary":{...}}
+{"kind":"call","turn":1,"toolUseId":"toolu_...","name":"get_project_summary","input":{},"outputPreview":"...","outputBytes":342,"durationMs":2,"isError":false,"timestamp":"2026-04-23T..."}
+{"kind":"call","turn":2,"toolUseId":"toolu_...","name":"search_code","input":{"pattern":"eval("},...}
+...
+```
+Useful for debugging, cost analysis, and compliance/audit-trail requirements.
 
 ---
 
@@ -281,6 +356,10 @@ Options:
   --max-files <n>           Max files to scan (default: 500)
   --max-file-size <kb>      Max file size in KB (default: 100)
   --static                  Static analysis only (no AI)
+  --fast                    One-shot AI mode (no agentic loop)
+  --max-turns <n>           Agentic iteration cap (default: 25)
+  --max-budget <tokens>     Agentic token ceiling (default: 500000)
+  --no-trace                Don't write agent-trace.jsonl
   --output-dir <dir>        Directory for report files (default: .claude-audit/)
   -q, --quiet               Suppress progress output
   --json                    Output JSON to stdout (CI/CD mode)

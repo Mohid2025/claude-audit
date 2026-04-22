@@ -3,12 +3,12 @@
 // ─────────────────────────────────────────────
 
 import { scoreToGrade } from './types';
-import type { AuditReport, CategoryScore, AuditOptions, Finding, AuditCategory } from './types';
+import type { AuditReport, CategoryScore, AuditOptions, Finding, AuditCategory, AgentTrace } from './types';
 import { scanProject } from './scanner';
 import { analyzeSecrets } from '../analyzers/static/secrets';
 import { analyzeDependencies } from '../analyzers/static/dependencies';
 import { analyzeComplexity } from '../analyzers/static/complexity';
-import { analyzeWithClaude } from '../analyzers/ai/claude-analyzer';
+import { analyzeWithClaude, analyzeWithClaudeAgent } from '../analyzers/ai/claude-analyzer';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { version: VERSION } = require('../../package.json');
@@ -90,20 +90,53 @@ export async function runAudit(
   // ── 3. AI analysis ────────────────────────
   let categories: CategoryScore[];
   let aiPowered = false;
+  let agentic = false;
+  let agentTrace: AgentTrace | undefined;
 
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
 
   if (!options.noAi && apiKey) {
-    onProgress('Sending codebase to Claude for deep analysis...');
-    try {
-      categories = await analyzeWithClaude(files, info, apiKey, options.model, options.categories);
-      categories = mergeStaticIntoCategories(categories, allStaticFindings);
-      aiPowered = true;
+    if (options.agentic) {
+      onProgress('Starting agentic audit (Claude will investigate via tools)...');
+      try {
+        const result = await analyzeWithClaudeAgent({
+          projectRoot: options.path,
+          info,
+          staticFindings: allStaticFindings,
+          apiKey,
+          model: options.model,
+          maxTurns: options.maxTurns,
+          maxBudgetTokens: options.maxBudgetTokens,
+          filterCategories: options.categories,
+          files,
+          hooks: {
+            onProgress: (m) => onProgress(m),
+          },
+        });
+        categories = mergeStaticIntoCategories(result.categories, allStaticFindings);
+        agentTrace = result.trace;
+        agentic = true;
+        aiPowered = true;
 
-      // Ensure dependencies category exists if we have dep findings
-      if (depFindings.length > 0 && !categories.find(c => c.category === 'dependencies')) {
+        // If the agent didn't finalize, gracefully degrade to static-only
+        if (result.trace.summary.stopReason !== 'completed') {
+          onProgress(`⚠ Agentic audit stopped early (${result.trace.summary.stopReason}). Merging partial findings with static analysis.`);
+        }
+      } catch (err) {
+        onProgress(`⚠ Agentic analysis failed (${err instanceof Error ? err.message : 'unknown error'}). Falling back to one-shot analysis.`);
+        try {
+          categories = await analyzeWithClaude(files, info, apiKey, options.model, options.categories);
+          categories = mergeStaticIntoCategories(categories, allStaticFindings);
+          aiPowered = true;
+        } catch (err2) {
+          onProgress(`⚠ One-shot analysis also failed (${err2 instanceof Error ? err2.message : 'unknown error'}). Falling back to static analysis only.`);
+          categories = buildStaticOnlyCategories(allStaticFindings, options.categories);
+        }
+      }
+
+      if (depFindings.length > 0 && !categories!.find(c => c.category === 'dependencies')) {
         const depScore = Math.max(0, 80 - depFindings.length * 8);
-        categories.push({
+        categories!.push({
           category: 'dependencies',
           score: depScore,
           grade: scoreToGrade(depScore),
@@ -111,9 +144,28 @@ export async function runAudit(
           summary: `${depFindings.length} dependency issue(s) found.`,
         });
       }
-    } catch (err) {
-      onProgress(`⚠ AI analysis failed (${err instanceof Error ? err.message : 'unknown error'}). Falling back to static analysis only.`);
-      categories = buildStaticOnlyCategories(allStaticFindings, options.categories);
+    } else {
+      onProgress('Sending codebase to Claude for one-shot analysis...');
+      try {
+        categories = await analyzeWithClaude(files, info, apiKey, options.model, options.categories);
+        categories = mergeStaticIntoCategories(categories, allStaticFindings);
+        aiPowered = true;
+
+        // Ensure dependencies category exists if we have dep findings
+        if (depFindings.length > 0 && !categories.find(c => c.category === 'dependencies')) {
+          const depScore = Math.max(0, 80 - depFindings.length * 8);
+          categories.push({
+            category: 'dependencies',
+            score: depScore,
+            grade: scoreToGrade(depScore),
+            findings: depFindings,
+            summary: `${depFindings.length} dependency issue(s) found.`,
+          });
+        }
+      } catch (err) {
+        onProgress(`⚠ AI analysis failed (${err instanceof Error ? err.message : 'unknown error'}). Falling back to static analysis only.`);
+        categories = buildStaticOnlyCategories(allStaticFindings, options.categories);
+      }
     }
   } else {
     if (!options.quiet && !apiKey && !options.noAi) {
@@ -165,6 +217,8 @@ export async function runAudit(
     mediumCount: allFindings.filter(f => f.severity === 'medium').length,
     lowCount: allFindings.filter(f => f.severity === 'low').length,
     aiPowered,
+    agentic: agentic || undefined,
+    agentTrace,
     durationMs: Date.now() - startTime,
   };
 }

@@ -58,6 +58,44 @@ export interface ScannedFile {
   content: string;
 }
 
+// ─── Agentic audit telemetry ────────────────────────────
+// Each tool invocation during an agentic audit is recorded so operators
+// can review, debug, and satisfy compliance/audit-trail requirements.
+export interface ToolCallRecord {
+  turn: number;                  // 1-based turn index
+  toolUseId: string;             // Claude-provided id (correlation key)
+  name: string;                  // tool name
+  input: Record<string, unknown>;
+  outputPreview: string;         // first N chars of tool_result (for trace)
+  outputBytes: number;           // full size before truncation
+  durationMs: number;
+  isError: boolean;
+  timestamp: string;             // ISO-8601
+}
+
+export interface AgentTraceSummary {
+  turns: number;
+  toolCalls: number;
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  stopReason: 'completed' | 'max_turns' | 'max_budget' | 'repetition' | 'error';
+  stopDetail?: string;
+  durationMs: number;
+  toolUsage: Record<string, number>;  // per-tool call counts
+}
+
+export interface AgentTrace {
+  enabled: true;
+  model: string;
+  maxTurns: number;
+  maxBudgetTokens: number;
+  summary: AgentTraceSummary;
+  calls: ToolCallRecord[];
+}
+
 export interface AuditReport {
   version: string;
   timestamp: string;
@@ -71,6 +109,8 @@ export interface AuditReport {
   mediumCount: number;
   lowCount: number;
   aiPowered: boolean;
+  agentic?: boolean;       // true when agentic loop was used
+  agentTrace?: AgentTrace; // present when agentic mode ran
   durationMs: number;
 }
 
@@ -84,6 +124,11 @@ export interface AuditOptions {
   model: string;
   noAi: boolean;
   quiet: boolean;
+  // ── Agentic controls ─────────────────────────────
+  agentic: boolean;        // default true when API key + !fast
+  maxTurns: number;        // hard ceiling on tool-use iterations
+  maxBudgetTokens: number; // cumulative input+output token cap
+  trace: boolean;          // write .claude-audit/agent-trace.jsonl
 }
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';

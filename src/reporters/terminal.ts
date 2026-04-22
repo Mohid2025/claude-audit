@@ -152,7 +152,9 @@ export function printReport(report: AuditReport): void {
     `  ${label('OVERALL')}   ${scoreColor.bold(overallScore + '/100')}   ${label('GRADE')}   ${gradeColor(' ' + overallGrade + ' ')}`,
     `  ${theme.tan('━'.repeat(52))}`,
     '',
-    `  ${report.aiPowered
+    `  ${report.agentic
+      ? theme.primary('✦ Agentic Audit (Claude + tools)')
+      : report.aiPowered
       ? theme.primary('✦ AI-Powered Analysis (Claude)')
       : theme.primary('⚡ Static Analysis Mode')}`,
     `  ${label('Duration')}    ${theme.tan(`${formatDuration(report.durationMs)} · ${new Date(report.timestamp).toLocaleString()}`)}`,
@@ -234,6 +236,37 @@ export function printReport(report: AuditReport): void {
 
       if (findings.length > 20) {
         console.log(`  ${theme.tan(`… and ${findings.length - 20} more. See full report in audit-report.md`)}`);
+      }
+    }
+  }
+
+  // ── Agent Trace Summary ───────────────────────────────
+  if (report.agentTrace) {
+    const s = report.agentTrace.summary;
+    console.log(sectionHeader('Agent Trace'));
+    const stopLabel = s.stopReason === 'completed'
+      ? theme.primary('completed')
+      : s.stopReason === 'max_turns' || s.stopReason === 'max_budget' || s.stopReason === 'repetition'
+      ? theme.ember.bold(s.stopReason)
+      : theme.deep(s.stopReason);
+    const cacheHitPct = (s.inputTokens + s.cacheReadTokens) > 0
+      ? Math.round((s.cacheReadTokens / (s.inputTokens + s.cacheReadTokens)) * 100)
+      : 0;
+
+    const rows = [
+      `  ${theme.primary('Model')}        ${theme.accent(report.agentTrace.model)}`,
+      `  ${theme.primary('Turns')}        ${theme.accent(`${s.turns}/${report.agentTrace.maxTurns}`)}  ${theme.tan('·')}  ${theme.primary('Tool calls')} ${theme.accent(String(s.toolCalls))}  ${theme.tan('·')}  ${theme.primary('Errors')} ${s.errors > 0 ? theme.ember(String(s.errors)) : theme.accent('0')}`,
+      `  ${theme.primary('Tokens')}       ${theme.accent(`${s.inputTokens.toLocaleString()} in · ${s.outputTokens.toLocaleString()} out`)}  ${theme.tan(`(cache ${s.cacheReadTokens.toLocaleString()} read, ${cacheHitPct}% hit)`)}`,
+      `  ${theme.primary('Stop reason')}  ${stopLabel}${s.stopDetail ? theme.tan(` — ${truncate(s.stopDetail, 70)}`) : ''}`,
+    ];
+    console.log(rows.join('\n'));
+
+    const usage = Object.entries(s.toolUsage).sort((a, b) => b[1] - a[1]);
+    if (usage.length > 0) {
+      console.log();
+      console.log(`  ${theme.primary('Tool usage')}`);
+      for (const [name, count] of usage) {
+        console.log(`    ${theme.tan('·')} ${theme.cream(name.padEnd(24))} ${theme.accent(String(count))}`);
       }
     }
   }

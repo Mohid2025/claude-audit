@@ -34,15 +34,20 @@ async function main(): Promise<void> {
     .option('--max-files <n>', 'Maximum files to scan', '500')
     .option('--max-file-size <kb>', 'Maximum file size in KB to include', '100')
     .option('--static', 'Run static analysis only (no AI)')
+    .option('--fast', 'Use one-shot AI mode (no agentic loop). Faster & cheaper but shallower.', false)
+    .option('--max-turns <n>', 'Max tool-use iterations for agentic mode', '25')
+    .option('--max-budget <tokens>', 'Hard ceiling on total tokens (input+output) per agentic audit', '500000')
+    .option('--no-trace', 'Do not write agent-trace.jsonl (trace is on by default in agentic mode)')
     .option('--output-dir <dir>', 'Directory for report files (default: .claude-audit/)')
     .option('-q, --quiet', 'Suppress progress output', false)
     .option('--json', 'Output JSON to stdout (for CI/CD)', false)
     .addHelpText('after', `
 Examples:
-  $ npx claude-audit
+  $ npx claude-audit                              # agentic audit (default when API key set)
   $ npx claude-audit ./my-project
-  $ npx claude-audit --api-key sk-ant-... -o terminal,html
-  $ npx claude-audit --static --output markdown
+  $ npx claude-audit --fast                       # one-shot mode (cheaper, shallower)
+  $ npx claude-audit --max-turns 40 --max-budget 1000000
+  $ npx claude-audit --static --output markdown   # no AI, static only
   $ npx claude-audit --json > audit.json
   $ ANTHROPIC_API_KEY=sk-ant-... npx claude-audit
     `);
@@ -65,6 +70,10 @@ Examples:
     ? (opts['categories'] as string).split(',').map(c => c.trim()) as AuditOptions['categories']
     : undefined;
 
+  const resolvedApiKey = (opts['apiKey'] as string | undefined) ?? process.env['ANTHROPIC_API_KEY'];
+  // Agentic is the default when an API key is available and --fast wasn't set.
+  const agentic = !opts['fast'] && !opts['static'] && !!resolvedApiKey;
+
   const options: AuditOptions = {
     path: path.resolve(projectPath),
     apiKey: opts['apiKey'] as string | undefined,
@@ -75,6 +84,11 @@ Examples:
     maxFileSize: parseInt(opts['maxFileSize'] as string) || 100,
     noAi: !!opts['static'],
     quiet: !!opts['quiet'],
+    agentic,
+    maxTurns: parseInt(opts['maxTurns'] as string) || 25,
+    maxBudgetTokens: parseInt(opts['maxBudget'] as string) || 500000,
+    // Commander sets `trace` to false when --no-trace is passed, true otherwise.
+    trace: opts['trace'] !== false,
   };
 
   // Print banner (unless JSON mode or quiet)
@@ -110,6 +124,21 @@ Examples:
     const needsFileOutput = outputFormats.some(f => f !== 'terminal') && !opts['json'];
     if (needsFileOutput) {
       fs.mkdirSync(reportDir, { recursive: true });
+    }
+
+    // Persist agent trace when agentic mode ran and trace is enabled
+    if (report.agentTrace && options.trace) {
+      fs.mkdirSync(reportDir, { recursive: true });
+      const tracePath = path.join(reportDir, 'agent-trace.jsonl');
+      const lines: string[] = [];
+      lines.push(JSON.stringify({ kind: 'meta', model: report.agentTrace.model, maxTurns: report.agentTrace.maxTurns, maxBudgetTokens: report.agentTrace.maxBudgetTokens, summary: report.agentTrace.summary }));
+      for (const call of report.agentTrace.calls) {
+        lines.push(JSON.stringify({ kind: 'call', ...call }));
+      }
+      fs.writeFileSync(tracePath, lines.join('\n') + '\n', 'utf-8');
+      if (!opts['json'] && !options.quiet) {
+        console.log(chalk.gray(`  🧭 Agent trace    → ${path.relative(process.cwd(), tracePath)}`));
+      }
     }
 
     if (outputFormats.includes('terminal') && !opts['json']) {

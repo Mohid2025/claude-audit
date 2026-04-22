@@ -3,7 +3,32 @@
 // ─────────────────────────────────────────────
 
 import fs from 'fs';
-import type { AuditReport, CategoryScore, Finding, AuditCategory } from '../core/types';
+import type { AuditReport, CategoryScore, Finding, AuditCategory, AgentTrace } from '../core/types';
+
+function renderTrace(trace: AgentTrace): string {
+  const s = trace.summary;
+  const usage = Object.entries(s.toolUsage).sort((a, b) => b[1] - a[1]);
+  const stopColor = s.stopReason === 'completed' ? '#4ade80'
+    : s.stopReason === 'max_turns' || s.stopReason === 'max_budget' || s.stopReason === 'repetition' ? '#f87171'
+    : '#facc15';
+  const usageHtml = usage.length === 0
+    ? ''
+    : `<div class="tool-usage">${usage.map(([n, c]) => `<span class="tool-chip"><code>${esc(n)}</code> · ${c}</span>`).join('')}</div>`;
+
+  return `
+  <div class="card" style="margin-bottom:2rem">
+    <h2>🧭 Agent Trace</h2>
+    <table class="info-table">
+      <tr><td>Model</td><td><code>${esc(trace.model)}</code></td></tr>
+      <tr><td>Turns</td><td>${s.turns} / ${trace.maxTurns}</td></tr>
+      <tr><td>Tool calls</td><td>${s.toolCalls}${s.errors > 0 ? ` <span style="color:#f87171">(${s.errors} error${s.errors === 1 ? '' : 's'})</span>` : ''}</td></tr>
+      <tr><td>Tokens</td><td>${s.inputTokens.toLocaleString()} in · ${s.outputTokens.toLocaleString()} out · ${s.cacheReadTokens.toLocaleString()} cache reads</td></tr>
+      <tr><td>Stop reason</td><td><span style="color:${stopColor};font-weight:600">${esc(s.stopReason)}</span>${s.stopDetail ? ` <span style="color:var(--muted)">— ${esc(s.stopDetail)}</span>` : ''}</td></tr>
+    </table>
+    ${usageHtml}
+  </div>`;
+}
+
 
 const CAT_ICONS: Record<AuditCategory, string> = {
   security: '🔒',
@@ -154,6 +179,11 @@ export function generateHtmlReport(report: AuditReport, outputPath: string): voi
 
   /* Section title */
   .section-title { font-size: 1.25rem; font-weight: 700; margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+
+  /* Tool usage chips */
+  .tool-usage { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+  .tool-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 0.25rem 0.75rem; font-size: 0.8rem; color: var(--muted); }
+  .tool-chip code { color: var(--cyan); font-family: 'Fira Code', monospace; }
 </style>
 </head>
 <body>
@@ -213,9 +243,11 @@ export function generateHtmlReport(report: AuditReport, outputPath: string): voi
       <tr><td>Lines of Code</td><td>${project.totalLines.toLocaleString()}</td></tr>
       <tr><td>Tests</td><td>${project.hasTests ? '✅ Yes' : '❌ No'}</td></tr>
       ${project.packageManager ? `<tr><td>Package Manager</td><td>${esc(project.packageManager)}</td></tr>` : ''}
-      <tr><td>Analysis</td><td>${report.aiPowered ? '✦ AI-Powered (Claude)' : '⚡ Static Only'}</td></tr>
+      <tr><td>Analysis</td><td>${report.agentic ? '✦ Agentic (Claude + tools)' : report.aiPowered ? '✦ AI-Powered (Claude)' : '⚡ Static Only'}</td></tr>
     </table>
   </div>
+
+  ${report.agentTrace ? renderTrace(report.agentTrace) : ''}
 
   <div class="section-title">📈 Category Results</div>
   <div class="categories">
