@@ -10,6 +10,45 @@ import type { AuditReport, Finding, CategoryScore, Severity, AuditCategory } fro
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { version: VERSION } = require('../../package.json');
 
+// ── Warm Amber Theme (Anthropic-inspired) ────────────────
+// Brand palette built around Anthropic's signature coral/amber tones.
+const AMBER = {
+  primary:  '#D97757', // Anthropic coral — primary accent
+  bright:   '#E8A87C', // Light amber — highlights
+  deep:     '#B85C38', // Burnt amber — emphasis
+  glow:     '#F4A261', // Warm glow — success-ish accents
+  cream:    '#F4E5D3', // Cream — subtle text
+  tan:      '#A67B5B', // Muted tan — dimmed text
+  ember:    '#C44536', // Deep ember — critical warmth
+};
+
+const theme = {
+  // Primary — golden amber, used for headings and key labels
+  primary:   chalk.hex(AMBER.bright).bold,
+  // Accent — coral, used for values / interactive numbers
+  accent:    chalk.hex(AMBER.primary),
+  accentBold:chalk.hex(AMBER.primary).bold,
+  // Body & muted
+  body:      chalk.hex(AMBER.cream),
+  muted:     chalk.hex(AMBER.tan),
+  // Legacy aliases (kept to minimise diff surface)
+  bright:    chalk.hex(AMBER.bright),
+  deep:      chalk.hex(AMBER.deep),
+  glow:      chalk.hex(AMBER.glow),
+  cream:     chalk.hex(AMBER.cream),
+  tan:       chalk.hex(AMBER.tan),
+  ember:     chalk.hex(AMBER.ember),
+  dim:       chalk.hex(AMBER.tan),
+};
+
+/** Render a section heading with an accent bar + tan underline. */
+function sectionHeader(title: string): string {
+  const bar = theme.accent('▌');
+  const head = theme.primary(title.toUpperCase());
+  const rule = theme.tan('─'.repeat(Math.max(4, 60 - title.length)));
+  return `\n  ${bar} ${head}  ${rule}\n`;
+}
+
 const CATEGORY_ICONS: Record<AuditCategory, string> = {
   security:      '🔒',
   quality:       '📊',
@@ -21,34 +60,31 @@ const CATEGORY_ICONS: Record<AuditCategory, string> = {
 };
 
 const SEVERITY_COLOR: Record<Severity, chalk.Chalk> = {
-  critical: chalk.bgRed.white.bold,
-  high:     chalk.red.bold,
-  medium:   chalk.yellow.bold,
-  low:      chalk.cyan,
-  info:     chalk.gray,
+  critical: chalk.bgHex(AMBER.ember).hex('#FFF5EC').bold,
+  high:     chalk.hex(AMBER.ember).bold,
+  medium:   chalk.hex(AMBER.deep).bold,
+  low:      chalk.hex(AMBER.glow),
+  info:     chalk.hex(AMBER.tan),
 };
 
-const SEVERITY_LABEL: Record<Severity, string> = {
-  critical: ' CRITICAL ',
-  high:     '  HIGH    ',
-  medium:   '  MEDIUM  ',
-  low:      '   LOW    ',
-  info:     '   INFO   ',
-};
-
+// A → F goes monotonically from lightest amber to darkest ember so the
+// grade colour alone communicates severity at a glance.
 const GRADE_COLOR: Record<string, chalk.Chalk> = {
-  A: chalk.greenBright.bold,
-  B: chalk.green.bold,
-  C: chalk.yellow.bold,
-  D: chalk.red,
-  F: chalk.bgRed.white.bold,
+  A: chalk.hex(AMBER.bright).bold,
+  B: chalk.hex(AMBER.glow).bold,
+  C: chalk.hex(AMBER.primary).bold,
+  D: chalk.hex(AMBER.deep).bold,
+  F: chalk.bgHex(AMBER.ember).hex('#FFF5EC').bold,
 };
 
 function scoreBar(score: number, width = 20): string {
   const filled = Math.round((score / 100) * width);
   const empty = width - filled;
-  const color = score >= 80 ? chalk.green : score >= 60 ? chalk.yellow : chalk.red;
-  return color('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
+  const color =
+    score >= 80 ? chalk.hex(AMBER.bright)
+    : score >= 60 ? chalk.hex(AMBER.primary)
+    : chalk.hex(AMBER.ember);
+  return color('█'.repeat(filled)) + chalk.hex(AMBER.tan)('░'.repeat(empty));
 }
 
 function formatDuration(ms: number): string {
@@ -62,29 +98,29 @@ function truncate(str: string, max: number): string {
 
 export function printBanner(): void {
   const banner = [
-    chalk.cyan.bold('   ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗'),
-    chalk.cyan.bold('  ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝'),
-    chalk.cyan.bold('  ██║     ██║     ███████║██║   ██║██║  ██║█████╗  '),
-    chalk.cyan.bold('  ██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝  '),
-    chalk.cyan.bold('  ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗'),
-    chalk.cyan.bold('   ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝'),
+    theme.bright.bold('   ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗'),
+    theme.bright.bold('  ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝'),
+    theme.bright.bold('  ██║     ██║     ███████║██║   ██║██║  ██║█████╗  '),
+    theme.bright.bold('  ██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝  '),
+    theme.bright.bold('  ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗'),
+    theme.bright.bold('   ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝'),
     '',
-    chalk.white.bold('         ██████╗ ██╗   ██╗██████╗ ██╗████████╗'),
-    chalk.white.bold('         ██╔══██╗██║   ██║██╔══██╗██║╚══██╔══╝'),
-    chalk.white.bold('         ███████║██║   ██║██║  ██║██║   ██║   '),
-    chalk.white.bold('         ██╔══██║██║   ██║██║  ██║██║   ██║   '),
-    chalk.white.bold('         ██║  ██║╚██████╔╝██████╔╝██║   ██║   '),
-    chalk.white.bold('         ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝   ╚═╝   '),
+    theme.bright.bold('         ██████╗ ██╗   ██╗██████╗ ██╗████████╗'),
+    theme.bright.bold('         ██╔══██╗██║   ██║██╔══██╗██║╚══██╔══╝'),
+    theme.bright.bold('         ███████║██║   ██║██║  ██║██║   ██║   '),
+    theme.bright.bold('         ██╔══██║██║   ██║██║  ██║██║   ██║   '),
+    theme.bright.bold('         ██║  ██║╚██████╔╝██████╔╝██║   ██║   '),
+    theme.bright.bold('         ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝   ╚═╝   '),
     '',
-    chalk.gray(`     AI-Powered Codebase Auditor  ·  v${VERSION}`),
-    chalk.gray('     github.com/itsmesherry/claude-audit'),
+    theme.cream(`     AI-Powered Codebase Auditor  ·  v${VERSION}`),
+    theme.tan('     github.com/itsmesherry/claude-audit'),
   ].join('\n');
 
   console.log(
     boxen(banner, {
       padding: 1,
       borderStyle: 'double',
-      borderColor: 'cyan',
+      borderColor: AMBER.primary,
     }),
   );
   console.log();
@@ -94,35 +130,43 @@ export function printReport(report: AuditReport): void {
   const { project, overallScore, overallGrade, categories, allFindings } = report;
 
   // ── Header ────────────────────────────────────────────
-  const gradeColor = GRADE_COLOR[overallGrade] ?? chalk.white;
-  const scoreColor = overallScore >= 80 ? chalk.greenBright : overallScore >= 60 ? chalk.yellow : chalk.red;
+  const gradeColor = GRADE_COLOR[overallGrade] ?? theme.cream;
+  const scoreColor =
+    overallScore >= 80 ? theme.bright
+    : overallScore >= 60 ? theme.accent
+    : theme.ember;
+
+  const label = theme.primary;
+  const dot = theme.tan('·');
 
   const headerContent = [
-    chalk.white.bold(`  Project: ${chalk.cyan(project.name)}`),
-    chalk.white(`  Path:    ${chalk.gray(path.relative(process.cwd(), project.path) || '.')}`),
-    chalk.white(`  Scanned: ${chalk.cyan(project.totalFiles + ' files')} · ${chalk.cyan(project.totalLines.toLocaleString() + ' lines')}`),
-    chalk.white(`  Stack:   ${chalk.cyan(Object.keys(project.languages).join(', ') || 'Unknown')}`),
+    `  ${label('Project')}     ${theme.accent.bold(project.name)}`,
+    `  ${label('Path')}        ${theme.tan(path.relative(process.cwd(), project.path) || '.')}`,
+    `  ${label('Scanned')}     ${theme.accent(project.totalFiles + ' files')} ${dot} ${theme.accent(project.totalLines.toLocaleString() + ' lines')}`,
+    `  ${label('Stack')}       ${theme.accent(Object.keys(project.languages).join(', ') || 'Unknown')}`,
     project.frameworks.length > 0
-      ? chalk.white(`  Frameworks: ${chalk.cyan(project.frameworks.join(', '))}`)
+      ? `  ${label('Frameworks')}  ${theme.accent(project.frameworks.join(', '))}`
       : '',
     '',
-    chalk.white('  ┌────────────────────────────────────┐'),
-    chalk.white('  │') +
-      '   OVERALL SCORE: ' + scoreColor.bold(overallScore + '/100') +
-      '  Grade: ' + gradeColor(overallGrade) +
-      chalk.white('   │'),
-    chalk.white('  └────────────────────────────────────┘'),
+    `  ${theme.tan('━'.repeat(52))}`,
+    `  ${label('OVERALL')}   ${scoreColor.bold(overallScore + '/100')}   ${label('GRADE')}   ${gradeColor(' ' + overallGrade + ' ')}`,
+    `  ${theme.tan('━'.repeat(52))}`,
     '',
-    chalk.white('  ') + (report.aiPowered
-      ? chalk.greenBright('✦ AI-Powered Analysis (Claude)')
-      : chalk.yellow('⚡ Static Analysis Mode')),
-    chalk.white('  ') + chalk.gray(`Duration: ${formatDuration(report.durationMs)} · ${new Date(report.timestamp).toLocaleString()}`),
+    `  ${report.aiPowered
+      ? theme.primary('✦ AI-Powered Analysis (Claude)')
+      : theme.primary('⚡ Static Analysis Mode')}`,
+    `  ${label('Duration')}    ${theme.tan(`${formatDuration(report.durationMs)} · ${new Date(report.timestamp).toLocaleString()}`)}`,
   ].filter(l => l !== '').join('\n');
+
+  const headerBorder =
+    overallScore >= 80 ? AMBER.bright
+    : overallScore >= 60 ? AMBER.primary
+    : AMBER.ember;
 
   console.log(boxen(headerContent, {
     padding: { top: 0, bottom: 0, left: 1, right: 2 },
     borderStyle: 'round',
-    borderColor: overallScore >= 80 ? 'green' : overallScore >= 60 ? 'yellow' : 'red',
+    borderColor: headerBorder,
     title: ' AUDIT REPORT ',
     titleAlignment: 'center',
   }));
@@ -130,68 +174,66 @@ export function printReport(report: AuditReport): void {
   console.log();
 
   // ── Category Scores ───────────────────────────────────
-  console.log(chalk.white.bold(' CATEGORY SCORES\n'));
+  console.log(sectionHeader('Category Scores'));
 
   for (const cat of categories) {
     const icon = CATEGORY_ICONS[cat.category] ?? '  ';
     const grade = GRADE_COLOR[cat.grade]?.(` ${cat.grade} `) ?? ` ${cat.grade} `;
     const bar = scoreBar(cat.score);
     const scoreStr = cat.score >= 80
-      ? chalk.green(`${cat.score}/100`)
+      ? theme.bright.bold(`${String(cat.score).padStart(3)}/100`)
       : cat.score >= 60
-      ? chalk.yellow(`${cat.score}/100`)
-      : chalk.red(`${cat.score}/100`);
+      ? theme.accent.bold(`${String(cat.score).padStart(3)}/100`)
+      : theme.ember.bold(`${String(cat.score).padStart(3)}/100`);
 
     const issueCount = cat.findings.length;
     const issueStr = issueCount > 0
-      ? chalk.gray(` · ${issueCount} issue${issueCount === 1 ? '' : 's'}`)
-      : chalk.gray(' · Clean');
+      ? theme.tan(` · ${issueCount} issue${issueCount === 1 ? '' : 's'}`)
+      : theme.tan(' · Clean');
 
-    const label = (cat.category.charAt(0).toUpperCase() + cat.category.slice(1)).padEnd(14);
+    const catLabel = (cat.category.charAt(0).toUpperCase() + cat.category.slice(1)).padEnd(14);
     console.log(
-      `  ${icon}  ${chalk.white.bold(label)}  ${bar}  ${scoreStr}  ${grade}${issueStr}`,
+      `  ${icon}  ${theme.primary(catLabel)}  ${bar}  ${scoreStr}  ${grade}${issueStr}`,
     );
   }
 
   // ── Summary Stats ─────────────────────────────────────
-  console.log();
-  console.log(chalk.white.bold(' FINDINGS SUMMARY\n'));
+  console.log(sectionHeader('Findings Summary'));
 
-  const stats = [
-    { label: '🔴 Critical', count: report.criticalCount, color: chalk.red.bold },
-    { label: '🟠 High',     count: report.highCount,     color: chalk.red },
-    { label: '🟡 Medium',   count: report.mediumCount,   color: chalk.yellow },
-    { label: '🔵 Low',      count: report.lowCount,      color: chalk.cyan },
+  const stats: { label: string; count: number; color: chalk.Chalk }[] = [
+    { label: 'Critical', count: report.criticalCount, color: theme.ember.bold },
+    { label: 'High',     count: report.highCount,     color: theme.deep.bold  },
+    { label: 'Medium',   count: report.mediumCount,   color: theme.glow.bold  },
+    { label: 'Low',      count: report.lowCount,      color: theme.bright.bold },
   ];
 
   const statLine = stats
-    .map(s => `  ${s.label}: ${s.color(String(s.count))}`)
-    .join('   ');
+    .map(s => `  ${theme.primary(s.label.padEnd(8))} ${s.color(String(s.count).padStart(3))}`)
+    .join(theme.tan('  │'));
   console.log(statLine);
 
   // ── Findings ──────────────────────────────────────────
   if (allFindings.length === 0) {
     console.log();
-    console.log(chalk.greenBright.bold('  ✓ No issues found! Excellent codebase.'));
+    console.log(`  ${theme.primary('✓')}  ${theme.primary('No issues found — excellent codebase.')}`);
   } else {
     const grouped = groupBySeverity(allFindings);
 
     for (const [severity, findings] of grouped) {
       if (findings.length === 0) continue;
-      const label = SEVERITY_LABEL[severity];
-      const color = SEVERITY_COLOR[severity] ?? chalk.white;
+      const color = SEVERITY_COLOR[severity] ?? theme.cream;
       const icon = severity === 'critical' ? '🚨' : severity === 'high' ? '⚠️ ' : severity === 'medium' ? '📋' : '💡';
 
       console.log();
-      console.log(`\n  ${icon}  ${color(label)}  ${chalk.bold(severity.toUpperCase() + ' ISSUES')} (${findings.length})`);
-      console.log(chalk.gray('  ' + '─'.repeat(70)));
+      console.log(`  ${icon} ${color(' ' + severity.toUpperCase() + ' ')} ${theme.primary('ISSUES')} ${theme.tan(`(${findings.length})`)}`);
+      console.log(`  ${theme.tan('─'.repeat(70))}`);
 
       for (const finding of findings.slice(0, 20)) { // max 20 shown per severity
         printFinding(finding);
       }
 
       if (findings.length > 20) {
-        console.log(chalk.gray(`  ... and ${findings.length - 20} more. See full report in audit-report.md`));
+        console.log(`  ${theme.tan(`… and ${findings.length - 20} more. See full report in audit-report.md`)}`);
       }
     }
   }
@@ -199,50 +241,49 @@ export function printReport(report: AuditReport): void {
   // ── Category AI Summaries ─────────────────────────────
   const summaries = categories.filter(c => c.summary && c.summary.length > 10);
   if (summaries.length > 0) {
-    console.log();
-    console.log(chalk.white.bold('\n  AI INSIGHTS\n'));
+    console.log(sectionHeader('AI Insights'));
     for (const cat of summaries) {
       const icon = CATEGORY_ICONS[cat.category] ?? '';
-      console.log(`  ${icon}  ${chalk.bold(cat.category.toUpperCase())}`);
-      console.log(`  ${chalk.gray(cat.summary)}`);
+      console.log(`  ${icon}  ${theme.primary(cat.category.toUpperCase())}`);
+      console.log(`     ${theme.cream(cat.summary)}`);
       console.log();
     }
   }
 
   // ── Footer ────────────────────────────────────────────
-  console.log(chalk.gray('  ' + '─'.repeat(70)));
+  console.log();
+  console.log(`  ${theme.tan('━'.repeat(70))}`);
   console.log();
 
   if (report.criticalCount > 0) {
-    console.log(chalk.red.bold('  ⛔ ' + report.criticalCount + ' CRITICAL issue(s) require immediate attention!'));
+    console.log(`  ${theme.ember.bold('⛔')}  ${theme.ember.bold(report.criticalCount + ' CRITICAL issue(s) require immediate attention.')}`);
   } else if (overallScore >= 90) {
-    console.log(chalk.greenBright.bold('  🎉 Excellent! Your codebase is in great shape.'));
+    console.log(`  ${theme.primary('✦')}  ${theme.primary('Excellent — your codebase is in great shape.')}`);
   } else if (overallScore >= 70) {
-    console.log(chalk.yellow.bold('  👍 Good codebase. Address the flagged issues to level up.'));
+    console.log(`  ${theme.accent.bold('→')}  ${theme.primary('Good codebase. Address the flagged issues to level up.')}`);
   } else {
-    console.log(chalk.red.bold('  🛠  Significant work needed. Start with critical and high severity issues.'));
+    console.log(`  ${theme.ember.bold('!')}  ${theme.deep.bold('Significant work needed. Start with critical and high severity.')}`);
   }
   console.log();
 }
 
 function printFinding(f: Finding): void {
-  const severity = SEVERITY_COLOR[f.severity] ?? chalk.white;
   const icon = CATEGORY_ICONS[f.category] ?? '';
   console.log();
-  console.log(`    ${icon} ${chalk.white.bold(f.title)}`);
-  console.log(`    ${chalk.gray(truncate(f.description, 100))}`);
+  console.log(`    ${icon} ${theme.primary(f.title)}`);
+  console.log(`       ${theme.cream(truncate(f.description, 100))}`);
 
   if (f.file) {
     const loc = f.line ? `${f.file}:${f.line}` : f.file;
-    console.log(`    ${chalk.dim('File:')} ${chalk.cyan(loc)}`);
+    console.log(`       ${theme.tan('File')}  ${theme.accent(loc)}`);
   }
 
   if (f.snippet) {
-    console.log(`    ${chalk.dim('Code:')} ${chalk.gray.italic(truncate(f.snippet, 90))}`);
+    console.log(`       ${theme.tan('Code')}  ${theme.tan.italic(truncate(f.snippet, 90))}`);
   }
 
   if (f.fix) {
-    console.log(`    ${chalk.dim('Fix: ')} ${chalk.greenBright(truncate(f.fix, 100))}`);
+    console.log(`       ${theme.tan('Fix')}   ${theme.bright(truncate(f.fix, 100))}`);
   }
 }
 
