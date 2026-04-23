@@ -15,8 +15,7 @@ const config: Config = {
     '!src/analyzers/ai/claude-analyzer.ts',
   ],
   coverageThreshold: {
-    // Pure-logic modules are held to a high bar: no network, no I/O,
-    // deterministic outputs → easy to test thoroughly.
+    // Pure-logic modules held to the strictest bar (no network, no I/O).
     'src/analyzers/static/**/*.ts': {
       branches: 80,
       functions: 95,
@@ -29,32 +28,30 @@ const config: Config = {
       lines: 90,
       statements: 90,
     },
-    // Sandboxed tool executors are mostly unit-testable — enforce a solid
-    // bar but leave headroom for the large tool-definition schema block.
+    // Sandboxed tool executors — deterministic once given a ToolContext.
     'src/analyzers/ai/tools.ts': {
-      branches: 60,
+      branches: 65,
       functions: 80,
       lines: 80,
       statements: 75,
     },
-    // The agent loop is 500+ lines of streaming SDK orchestration. The
-    // pure helpers (hashToolCall, detectRepetition, buildInitialUserPrompt,
-    // buildCategoriesFromFinal) are covered; the runAgentLoop fn itself
-    // would need a full Anthropic mock to test meaningfully. Hold the
-    // exported helpers to a reasonable bar without demanding integration
-    // coverage for the orchestrator.
+    // The agent loop is exercised via a mocked Anthropic SDK. Branches are
+    // the hardest to cover because the SDK response shape has many
+    // defensive guards; everything else is at parity with the rest of the
+    // codebase.
     'src/analyzers/ai/agent-loop.ts': {
-      branches: 4,
-      functions: 15,
-      lines: 10,
-      statements: 10,
-    },
-    // Global floor: catches any new file that's genuinely untested.
-    global: {
-      branches: 55,
+      branches: 50,
       functions: 70,
-      lines: 60,
-      statements: 60,
+      lines: 80,
+      statements: 80,
+    },
+    // Global floor — keeps aggregate healthy and catches genuinely
+    // untested new files without hiding per-module regressions.
+    global: {
+      branches: 70,
+      functions: 85,
+      lines: 85,
+      statements: 85,
     },
   },
 };
