@@ -67,15 +67,15 @@ describe('analyzeComplexity', () => {
     });
   });
 
-  describe('console.log detection', () => {
-    it('flags >5 console calls in non-CLI files', () => {
+  describe('production leftovers detection', () => {
+    it('flags >5 leftover debug statements in non-CLI files', () => {
       const lines = [
         'const a = 1;',
         ...Array.from({ length: 6 }, (_, i) => `console.log("debug ${i}");`),
       ];
       const files = [makeFile('src/verbose.ts', lines.join('\n'))];
       const findings = analyzeComplexity(files);
-      expect(findings.some(f => f.title === 'Excessive console.log Usage')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected')).toBe(true);
     });
 
     it('also counts console.error and console.warn', () => {
@@ -85,32 +85,132 @@ describe('analyzeComplexity', () => {
       ];
       const files = [makeFile('src/logging.ts', lines.join('\n'))];
       const findings = analyzeComplexity(files);
-      expect(findings.some(f => f.title === 'Excessive console.log Usage')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected')).toBe(true);
     });
 
-    it('does not flag 5 or fewer console calls', () => {
+    it('does not flag 5 or fewer leftover debug statements', () => {
       const lines = Array.from({ length: 5 }, (_, i) => `console.log("${i}");`);
       const files = [makeFile('src/ok.ts', lines.join('\n'))];
       const findings = analyzeComplexity(files);
-      expect(findings.some(f => f.title === 'Excessive console.log Usage')).toBe(false);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected')).toBe(false);
     });
 
     it('skips CLI entry files (index.ts)', () => {
       const lines = Array.from({ length: 10 }, (_, i) => `console.log("output ${i}");`);
       const files = [makeFile('src/index.ts', lines.join('\n'))];
-      expect(analyzeComplexity(files).some(f => f.title === 'Excessive console.log Usage')).toBe(false);
+      expect(analyzeComplexity(files).some(f => f.title === 'Production Leftovers Detected')).toBe(false);
     });
 
     it('skips reporter files', () => {
       const lines = Array.from({ length: 10 }, (_, i) => `console.log("report ${i}");`);
       const files = [makeFile('src/reporters/terminal.ts', lines.join('\n'))];
-      expect(analyzeComplexity(files).some(f => f.title === 'Excessive console.log Usage')).toBe(false);
+      expect(analyzeComplexity(files).some(f => f.title === 'Production Leftovers Detected')).toBe(false);
     });
 
     it('skips bin/ entry files', () => {
       const lines = Array.from({ length: 10 }, (_, i) => `console.log("bin ${i}");`);
       const files = [makeFile('bin/cli.js', lines.join('\n'))];
-      expect(analyzeComplexity(files).some(f => f.title === 'Excessive console.log Usage')).toBe(false);
+      expect(analyzeComplexity(files).some(f => f.title === 'Production Leftovers Detected')).toBe(false);
+    });
+
+    it('flags debugger and alert() as production leftovers in non-CLI TS files', () => {
+      const app = makeFile('src/app.ts', [
+        'debugger;',
+        'alert("debug");',
+        'console.time("t");',
+        'console.timeEnd("t");',
+        'console.log("debug");',
+        'console.warn("warn");',
+      ].join('\n'));
+      const cli = makeFile('src/index.ts', [
+        'debugger;',
+        'alert("debug");',
+        'console.time("t");',
+        'console.timeEnd("t");',
+        'console.log("debug");',
+        'console.warn("warn");',
+      ].join('\n'));
+      const findings = analyzeComplexity([app, cli]);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/app.ts')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/index.ts')).toBe(false);
+    });
+
+    it('flags console.time and console.timeEnd in non-CLI TS files', () => {
+      const app = makeFile('src/app.ts', [
+        'console.time("t1");',
+        'console.timeEnd("t1");',
+        'console.time("t2");',
+        'console.timeEnd("t2");',
+        'console.log("d");',
+        'console.debug("d");',
+      ].join('\n'));
+      const cli = makeFile('src/index.ts', [
+        'console.time("t1");',
+        'console.timeEnd("t1");',
+        'console.time("t2");',
+        'console.timeEnd("t2");',
+        'console.log("d");',
+        'console.debug("d");',
+      ].join('\n'));
+      const findings = analyzeComplexity([app, cli]);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/app.ts')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/index.ts')).toBe(false);
+    });
+
+    it('flags Python breakpoint() and print() as production leftovers in non-CLI files', () => {
+      const appPy = {
+        ...makeFile('src/app.py', [
+          'breakpoint()',
+          'print("debug")',
+          'print("another debug")',
+          'print("more debug")',
+          'print("more debug 2")',
+          'print("more debug 3")',
+        ].join('\n')),
+        language: 'Python' as const,
+      };
+      const cli = makeFile('src/index.ts', Array.from({ length: 6 }, (_, i) => `console.log("output ${i}");`).join('\n'));
+      const findings = analyzeComplexity([appPy, cli]);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/app.py')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/index.ts')).toBe(false);
+    });
+
+    it('flags Python pdb.set_trace() as production leftovers in non-CLI files', () => {
+      const appPy = {
+        ...makeFile('src/app.py', [
+          'import pdb',
+          'pdb.set_trace()',
+          'pdb.set_trace()',
+          'pdb.set_trace()',
+          'pdb.set_trace()',
+          'pdb.set_trace()',
+          'pdb.set_trace()',
+        ].join('\n')),
+        language: 'Python' as const,
+      };
+      const cli = makeFile('src/index.ts', Array.from({ length: 6 }, (_, i) => `console.log("output ${i}");`).join('\n'));
+      const findings = analyzeComplexity([appPy, cli]);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/app.py')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/index.ts')).toBe(false);
+    });
+
+    it('flags PHP var_dump(), die(), and exit() in non-CLI files', () => {
+      const appPhp = {
+        ...makeFile('src/app.php', [
+          '<?php',
+          'var_dump($x);',
+          'die("debug");',
+          'exit(1);',
+          'var_dump($y);',
+          'die("debug2");',
+          'exit(2);',
+        ].join('\n')),
+        language: 'PHP' as const,
+      };
+      const cli = makeFile('src/index.ts', Array.from({ length: 6 }, (_, i) => `console.log("output ${i}");`).join('\n'));
+      const findings = analyzeComplexity([appPhp, cli]);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/app.php')).toBe(true);
+      expect(findings.some(f => f.title === 'Production Leftovers Detected' && f.file === 'src/index.ts')).toBe(false);
     });
   });
 
