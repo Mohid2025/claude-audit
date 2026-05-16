@@ -110,6 +110,16 @@ function analyzeFileComplexity(file: ScannedFile): ComplexityResult {
       importsSeen.add(mod);
     }
 
+    // Long lines (>120 chars, ignoring comments/strings)
+    if (line.length > 120 && !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('#')) {
+      result.longLines.push(i + 1);
+    }
+
+    // TODO / FIXME count
+    if (/\b(TODO|FIXME|HACK|XXX)\b/i.test(trimmed)) {
+      result.todoCount++;
+    }
+
     // Production leftover detection
     if (isJsLike && jsLeftover.test(line)) {
       result.productionLeftoverCount++;
